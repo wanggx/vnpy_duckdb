@@ -91,92 +91,96 @@ class DuckdbDatabase(BaseDatabase):
     def _init_tables(self) -> None:
         """Create tables if they do not exist."""
         with self.lock:
-            self.conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS dbbardata (
-                    symbol VARCHAR NOT NULL,
-                    exchange VARCHAR NOT NULL,
-                    datetime TIMESTAMP NOT NULL,
-                    interval VARCHAR NOT NULL,
-                    volume DOUBLE NOT NULL,
-                    turnover DOUBLE NOT NULL,
-                    open_interest DOUBLE NOT NULL,
-                    open_price DOUBLE NOT NULL,
-                    high_price DOUBLE NOT NULL,
-                    low_price DOUBLE NOT NULL,
-                    close_price DOUBLE NOT NULL,
-                    PRIMARY KEY (symbol, exchange, interval, datetime)
+            cursor: duckdb.DuckDBPyConnection = self.conn.cursor()
+            try:
+                cursor.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS dbbardata (
+                        symbol VARCHAR NOT NULL,
+                        exchange VARCHAR NOT NULL,
+                        datetime TIMESTAMP NOT NULL,
+                        interval VARCHAR NOT NULL,
+                        volume DOUBLE NOT NULL,
+                        turnover DOUBLE NOT NULL,
+                        open_interest DOUBLE NOT NULL,
+                        open_price DOUBLE NOT NULL,
+                        high_price DOUBLE NOT NULL,
+                        low_price DOUBLE NOT NULL,
+                        close_price DOUBLE NOT NULL,
+                        PRIMARY KEY (symbol, exchange, interval, datetime)
+                    )
+                    """
                 )
-                """
-            )
-            self.conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS dbtickdata (
-                    symbol VARCHAR NOT NULL,
-                    exchange VARCHAR NOT NULL,
-                    datetime TIMESTAMP NOT NULL,
-                    name VARCHAR NOT NULL,
-                    volume DOUBLE NOT NULL,
-                    turnover DOUBLE NOT NULL,
-                    open_interest DOUBLE NOT NULL,
-                    last_price DOUBLE NOT NULL,
-                    last_volume DOUBLE NOT NULL,
-                    limit_up DOUBLE NOT NULL,
-                    limit_down DOUBLE NOT NULL,
-                    open_price DOUBLE NOT NULL,
-                    high_price DOUBLE NOT NULL,
-                    low_price DOUBLE NOT NULL,
-                    pre_close DOUBLE NOT NULL,
-                    bid_price_1 DOUBLE NOT NULL,
-                    bid_price_2 DOUBLE NOT NULL,
-                    bid_price_3 DOUBLE NOT NULL,
-                    bid_price_4 DOUBLE NOT NULL,
-                    bid_price_5 DOUBLE NOT NULL,
-                    ask_price_1 DOUBLE NOT NULL,
-                    ask_price_2 DOUBLE NOT NULL,
-                    ask_price_3 DOUBLE NOT NULL,
-                    ask_price_4 DOUBLE NOT NULL,
-                    ask_price_5 DOUBLE NOT NULL,
-                    bid_volume_1 DOUBLE NOT NULL,
-                    bid_volume_2 DOUBLE NOT NULL,
-                    bid_volume_3 DOUBLE NOT NULL,
-                    bid_volume_4 DOUBLE NOT NULL,
-                    bid_volume_5 DOUBLE NOT NULL,
-                    ask_volume_1 DOUBLE NOT NULL,
-                    ask_volume_2 DOUBLE NOT NULL,
-                    ask_volume_3 DOUBLE NOT NULL,
-                    ask_volume_4 DOUBLE NOT NULL,
-                    ask_volume_5 DOUBLE NOT NULL,
-                    localtime TIMESTAMP,
-                    PRIMARY KEY (symbol, exchange, datetime)
+                cursor.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS dbtickdata (
+                        symbol VARCHAR NOT NULL,
+                        exchange VARCHAR NOT NULL,
+                        datetime TIMESTAMP NOT NULL,
+                        name VARCHAR NOT NULL,
+                        volume DOUBLE NOT NULL,
+                        turnover DOUBLE NOT NULL,
+                        open_interest DOUBLE NOT NULL,
+                        last_price DOUBLE NOT NULL,
+                        last_volume DOUBLE NOT NULL,
+                        limit_up DOUBLE NOT NULL,
+                        limit_down DOUBLE NOT NULL,
+                        open_price DOUBLE NOT NULL,
+                        high_price DOUBLE NOT NULL,
+                        low_price DOUBLE NOT NULL,
+                        pre_close DOUBLE NOT NULL,
+                        bid_price_1 DOUBLE NOT NULL,
+                        bid_price_2 DOUBLE NOT NULL,
+                        bid_price_3 DOUBLE NOT NULL,
+                        bid_price_4 DOUBLE NOT NULL,
+                        bid_price_5 DOUBLE NOT NULL,
+                        ask_price_1 DOUBLE NOT NULL,
+                        ask_price_2 DOUBLE NOT NULL,
+                        ask_price_3 DOUBLE NOT NULL,
+                        ask_price_4 DOUBLE NOT NULL,
+                        ask_price_5 DOUBLE NOT NULL,
+                        bid_volume_1 DOUBLE NOT NULL,
+                        bid_volume_2 DOUBLE NOT NULL,
+                        bid_volume_3 DOUBLE NOT NULL,
+                        bid_volume_4 DOUBLE NOT NULL,
+                        bid_volume_5 DOUBLE NOT NULL,
+                        ask_volume_1 DOUBLE NOT NULL,
+                        ask_volume_2 DOUBLE NOT NULL,
+                        ask_volume_3 DOUBLE NOT NULL,
+                        ask_volume_4 DOUBLE NOT NULL,
+                        ask_volume_5 DOUBLE NOT NULL,
+                        localtime TIMESTAMP,
+                        PRIMARY KEY (symbol, exchange, datetime)
+                    )
+                    """
                 )
-                """
-            )
-            self.conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS dbbaroverview (
-                    symbol VARCHAR NOT NULL,
-                    exchange VARCHAR NOT NULL,
-                    interval VARCHAR NOT NULL,
-                    count INTEGER NOT NULL,
-                    start TIMESTAMP NOT NULL,
-                    "end" TIMESTAMP NOT NULL,
-                    PRIMARY KEY (symbol, exchange, interval)
+                cursor.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS dbbaroverview (
+                        symbol VARCHAR NOT NULL,
+                        exchange VARCHAR NOT NULL,
+                        interval VARCHAR NOT NULL,
+                        count INTEGER NOT NULL,
+                        start TIMESTAMP NOT NULL,
+                        "end" TIMESTAMP NOT NULL,
+                        PRIMARY KEY (symbol, exchange, interval)
+                    )
+                    """
                 )
-                """
-            )
-            self.conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS dbtickoverview (
-                    symbol VARCHAR NOT NULL,
-                    exchange VARCHAR NOT NULL,
-                    count INTEGER NOT NULL,
-                    start TIMESTAMP NOT NULL,
-                    "end" TIMESTAMP NOT NULL,
-                    PRIMARY KEY (symbol, exchange)
+                cursor.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS dbtickoverview (
+                        symbol VARCHAR NOT NULL,
+                        exchange VARCHAR NOT NULL,
+                        count INTEGER NOT NULL,
+                        start TIMESTAMP NOT NULL,
+                        "end" TIMESTAMP NOT NULL,
+                        PRIMARY KEY (symbol, exchange)
+                    )
+                    """
                 )
-                """
-            )
+            finally:
+                cursor.close()
 
     def save_bar_data(self, bars: list[BarData], stream: bool = False) -> bool:
         """Save bar data into database."""
@@ -198,16 +202,21 @@ class DuckdbDatabase(BaseDatabase):
         end: datetime = df["datetime"].max().to_pydatetime()
 
         with self.lock:
-            self._register_and_write_bar(
-                df,
-                symbol,
-                exchange.value,
-                interval.value,
-                start,
-                end,
-                unique_count,
-                stream,
-            )
+            cursor: duckdb.DuckDBPyConnection = self.conn.cursor()
+            try:
+                self._register_and_write_bar(
+                    cursor,
+                    df,
+                    symbol,
+                    exchange.value,
+                    interval.value,
+                    start,
+                    end,
+                    unique_count,
+                    stream,
+                )
+            finally:
+                cursor.close()
 
         return True
 
@@ -228,15 +237,20 @@ class DuckdbDatabase(BaseDatabase):
         end: datetime = df["datetime"].max().to_pydatetime()
 
         with self.lock:
-            self._register_and_write_tick(
-                df,
-                symbol,
-                exchange.value,
-                start,
-                end,
-                unique_count,
-                stream,
-            )
+            cursor: duckdb.DuckDBPyConnection = self.conn.cursor()
+            try:
+                self._register_and_write_tick(
+                    cursor,
+                    df,
+                    symbol,
+                    exchange.value,
+                    start,
+                    end,
+                    unique_count,
+                    stream,
+                )
+            finally:
+                cursor.close()
 
         return True
 
@@ -269,7 +283,11 @@ class DuckdbDatabase(BaseDatabase):
         )
 
         with self.lock:
-            rows: list[tuple] = self.conn.execute(sql, params).fetchall()
+            cursor: duckdb.DuckDBPyConnection = self.conn.cursor()
+            try:
+                rows: list[tuple] = cursor.execute(sql, params).fetchall()
+            finally:
+                cursor.close()
 
         bars: list[BarData] = []
         for row in rows:
@@ -317,7 +335,11 @@ class DuckdbDatabase(BaseDatabase):
         )
 
         with self.lock:
-            rows: list[tuple] = self.conn.execute(sql, params).fetchall()
+            cursor: duckdb.DuckDBPyConnection = self.conn.cursor()
+            try:
+                rows: list[tuple] = cursor.execute(sql, params).fetchall()
+            finally:
+                cursor.close()
 
         ticks: list[TickData] = []
         for row in rows:
@@ -373,86 +395,100 @@ class DuckdbDatabase(BaseDatabase):
     ) -> int:
         """Delete all bar data with given symbol + exchange + interval."""
         with self.lock:
-            self.conn.execute("BEGIN TRANSACTION")
+            cursor: duckdb.DuckDBPyConnection = self.conn.cursor()
             try:
-                count: int = self._fetch_scalar_int(
-                    """
-                    SELECT count(*)
-                    FROM dbbardata
-                    WHERE symbol = ? AND exchange = ? AND interval = ?
-                    """,
-                    (symbol, exchange.value, interval.value),
-                )
-                self.conn.execute(
-                    """
-                    DELETE FROM dbbardata
-                    WHERE symbol = ? AND exchange = ? AND interval = ?
-                    """,
-                    (symbol, exchange.value, interval.value),
-                )
-                self.conn.execute(
-                    """
-                    DELETE FROM dbbaroverview
-                    WHERE symbol = ? AND exchange = ? AND interval = ?
-                    """,
-                    (symbol, exchange.value, interval.value),
-                )
-                self.conn.execute("COMMIT")
-            except Exception:
-                self.conn.execute("ROLLBACK")
-                raise
+                cursor.execute("BEGIN TRANSACTION")
+                try:
+                    count: int = self._fetch_scalar_int(
+                        cursor,
+                        """
+                        SELECT count(*)
+                        FROM dbbardata
+                        WHERE symbol = ? AND exchange = ? AND interval = ?
+                        """,
+                        (symbol, exchange.value, interval.value),
+                    )
+                    cursor.execute(
+                        """
+                        DELETE FROM dbbardata
+                        WHERE symbol = ? AND exchange = ? AND interval = ?
+                        """,
+                        (symbol, exchange.value, interval.value),
+                    )
+                    cursor.execute(
+                        """
+                        DELETE FROM dbbaroverview
+                        WHERE symbol = ? AND exchange = ? AND interval = ?
+                        """,
+                        (symbol, exchange.value, interval.value),
+                    )
+                    cursor.execute("COMMIT")
+                except Exception:
+                    cursor.execute("ROLLBACK")
+                    raise
+            finally:
+                cursor.close()
 
         return count
 
     def delete_tick_data(self, symbol: str, exchange: Exchange) -> int:
         """Delete all tick data with given symbol + exchange."""
         with self.lock:
-            self.conn.execute("BEGIN TRANSACTION")
+            cursor: duckdb.DuckDBPyConnection = self.conn.cursor()
             try:
-                count: int = self._fetch_scalar_int(
-                    """
-                    SELECT count(*)
-                    FROM dbtickdata
-                    WHERE symbol = ? AND exchange = ?
-                    """,
-                    (symbol, exchange.value),
-                )
-                self.conn.execute(
-                    """
-                    DELETE FROM dbtickdata
-                    WHERE symbol = ? AND exchange = ?
-                    """,
-                    (symbol, exchange.value),
-                )
-                self.conn.execute(
-                    """
-                    DELETE FROM dbtickoverview
-                    WHERE symbol = ? AND exchange = ?
-                    """,
-                    (symbol, exchange.value),
-                )
-                self.conn.execute("COMMIT")
-            except Exception:
-                self.conn.execute("ROLLBACK")
-                raise
+                cursor.execute("BEGIN TRANSACTION")
+                try:
+                    count: int = self._fetch_scalar_int(
+                        cursor,
+                        """
+                        SELECT count(*)
+                        FROM dbtickdata
+                        WHERE symbol = ? AND exchange = ?
+                        """,
+                        (symbol, exchange.value),
+                    )
+                    cursor.execute(
+                        """
+                        DELETE FROM dbtickdata
+                        WHERE symbol = ? AND exchange = ?
+                        """,
+                        (symbol, exchange.value),
+                    )
+                    cursor.execute(
+                        """
+                        DELETE FROM dbtickoverview
+                        WHERE symbol = ? AND exchange = ?
+                        """,
+                        (symbol, exchange.value),
+                    )
+                    cursor.execute("COMMIT")
+                except Exception:
+                    cursor.execute("ROLLBACK")
+                    raise
+            finally:
+                cursor.close()
 
         return count
 
     def get_bar_overview(self) -> list[BarOverview]:
         """Return bar data available in database."""
         with self.lock:
-            data_count: int = self._fetch_scalar_int("SELECT count(*) FROM dbbardata")
-            overview_count: int = self._fetch_scalar_int("SELECT count(*) FROM dbbaroverview")
-            if data_count and not overview_count:
-                self.init_bar_overview()
+            cursor: duckdb.DuckDBPyConnection = self.conn.cursor()
+            try:
+                data_count: int = self._fetch_scalar_int(cursor, "SELECT count(*) FROM dbbardata")
+                overview_count: int = self._fetch_scalar_int(cursor, "SELECT count(*) FROM dbbaroverview")
+                if data_count and not overview_count:
+                    self.init_bar_overview(cursor)
 
-            rows: list[tuple] = self.conn.execute(
-                """
-                SELECT symbol, exchange, interval, count, start, "end"
-                FROM dbbaroverview
-                ORDER BY symbol, exchange, interval
-                """
-            ).fetchall()
+                rows: list[tuple] = cursor.execute(
+                    """
+                    SELECT symbol, exchange, interval, count, start, "end"
+                    FROM dbbaroverview
+                    ORDER BY symbol, exchange, interval
+                    """
+                ).fetchall()
+            finally:
+                cursor.close()
 
         return [
             BarOverview(
@@ -469,18 +505,22 @@ class DuckdbDatabase(BaseDatabase):
     def get_tick_overview(self) -> list[TickOverview]:
         """Return tick data available in database."""
         with self.lock:
-            data_count: int = self._fetch_scalar_int("SELECT count(*) FROM dbtickdata")
-            overview_count: int = self._fetch_scalar_int("SELECT count(*) FROM dbtickoverview")
-            if data_count and not overview_count:
-                self.init_tick_overview()
+            cursor: duckdb.DuckDBPyConnection = self.conn.cursor()
+            try:
+                data_count: int = self._fetch_scalar_int(cursor, "SELECT count(*) FROM dbtickdata")
+                overview_count: int = self._fetch_scalar_int(cursor, "SELECT count(*) FROM dbtickoverview")
+                if data_count and not overview_count:
+                    self.init_tick_overview(cursor)
 
-            rows: list[tuple] = self.conn.execute(
-                """
-                SELECT symbol, exchange, count, start, "end"
-                FROM dbtickoverview
-                ORDER BY symbol, exchange
-                """
-            ).fetchall()
+                rows: list[tuple] = cursor.execute(
+                    """
+                    SELECT symbol, exchange, count, start, "end"
+                    FROM dbtickoverview
+                    ORDER BY symbol, exchange
+                    """
+                ).fetchall()
+            finally:
+                cursor.close()
 
         return [
             TickOverview(
@@ -493,10 +533,10 @@ class DuckdbDatabase(BaseDatabase):
             for row in rows
         ]
 
-    def init_bar_overview(self) -> None:
+    def init_bar_overview(self, cursor: duckdb.DuckDBPyConnection) -> None:
         """Initialize bar overview from existing bar data."""
         with self.lock:
-            self.conn.execute(
+            cursor.execute(
                 """
                 INSERT OR REPLACE INTO dbbaroverview BY NAME
                 SELECT
@@ -511,10 +551,10 @@ class DuckdbDatabase(BaseDatabase):
                 """
             )
 
-    def init_tick_overview(self) -> None:
+    def init_tick_overview(self, cursor: duckdb.DuckDBPyConnection) -> None:
         """Initialize tick overview from existing tick data."""
         with self.lock:
-            self.conn.execute(
+            cursor.execute(
                 """
                 INSERT OR REPLACE INTO dbtickoverview BY NAME
                 SELECT
@@ -535,6 +575,7 @@ class DuckdbDatabase(BaseDatabase):
 
     def _register_and_write_bar(
         self,
+        cursor: duckdb.DuckDBPyConnection,
         df: pd.DataFrame,
         symbol: str,
         exchange: str,
@@ -545,23 +586,24 @@ class DuckdbDatabase(BaseDatabase):
         stream: bool,
     ) -> None:
         """Register bar DataFrame and upsert it with overview in one transaction."""
-        self.conn.register("bar_staging", df)
-        self.conn.execute("BEGIN TRANSACTION")
+        cursor.register("bar_staging", df)
+        cursor.execute("BEGIN TRANSACTION")
         try:
-            self.conn.execute("INSERT OR REPLACE INTO dbbardata BY NAME SELECT * FROM bar_staging")
+            cursor.execute("INSERT OR REPLACE INTO dbbardata BY NAME SELECT * FROM bar_staging")
             if stream:
-                self._upsert_stream_bar_overview(symbol, exchange, interval, start, end, count)
+                self._upsert_stream_bar_overview(cursor, symbol, exchange, interval, start, end, count)
             else:
-                self._refresh_bar_overview(symbol, exchange, interval)
-            self.conn.execute("COMMIT")
+                self._refresh_bar_overview(cursor, symbol, exchange, interval)
+            cursor.execute("COMMIT")
         except Exception:
-            self.conn.execute("ROLLBACK")
+            cursor.execute("ROLLBACK")
             raise
         finally:
-            self.conn.unregister("bar_staging")
+            cursor.unregister("bar_staging")
 
     def _register_and_write_tick(
         self,
+        cursor: duckdb.DuckDBPyConnection,
         df: pd.DataFrame,
         symbol: str,
         exchange: str,
@@ -571,23 +613,24 @@ class DuckdbDatabase(BaseDatabase):
         stream: bool,
     ) -> None:
         """Register tick DataFrame and upsert it with overview in one transaction."""
-        self.conn.register("tick_staging", df)
-        self.conn.execute("BEGIN TRANSACTION")
+        cursor.register("tick_staging", df)
+        cursor.execute("BEGIN TRANSACTION")
         try:
-            self.conn.execute("INSERT OR REPLACE INTO dbtickdata BY NAME SELECT * FROM tick_staging")
+            cursor.execute("INSERT OR REPLACE INTO dbtickdata BY NAME SELECT * FROM tick_staging")
             if stream:
-                self._upsert_stream_tick_overview(symbol, exchange, start, end, count)
+                self._upsert_stream_tick_overview(cursor, symbol, exchange, start, end, count)
             else:
-                self._refresh_tick_overview(symbol, exchange)
-            self.conn.execute("COMMIT")
+                self._refresh_tick_overview(cursor, symbol, exchange)
+            cursor.execute("COMMIT")
         except Exception:
-            self.conn.execute("ROLLBACK")
+            cursor.execute("ROLLBACK")
             raise
         finally:
-            self.conn.unregister("tick_staging")
+            cursor.unregister("tick_staging")
 
     def _upsert_stream_bar_overview(
         self,
+        cursor: duckdb.DuckDBPyConnection,
         symbol: str,
         exchange: str,
         interval: str,
@@ -596,7 +639,7 @@ class DuckdbDatabase(BaseDatabase):
         count: int,
     ) -> None:
         """Incrementally update bar overview for streaming writes."""
-        row: tuple | None = self.conn.execute(
+        row: tuple | None = cursor.execute(
             """
             SELECT count, start, "end"
             FROM dbbaroverview
@@ -607,7 +650,7 @@ class DuckdbDatabase(BaseDatabase):
 
         if row:
             overview_count, overview_start, overview_end = row
-            self.conn.execute(
+            cursor.execute(
                 """
                 UPDATE dbbaroverview
                 SET count = ?, start = ?, "end" = ?
@@ -623,7 +666,7 @@ class DuckdbDatabase(BaseDatabase):
                 ),
             )
         else:
-            self.conn.execute(
+            cursor.execute(
                 """
                 INSERT INTO dbbaroverview
                     (symbol, exchange, interval, count, start, "end")
@@ -634,6 +677,7 @@ class DuckdbDatabase(BaseDatabase):
 
     def _upsert_stream_tick_overview(
         self,
+        cursor: duckdb.DuckDBPyConnection,
         symbol: str,
         exchange: str,
         start: datetime,
@@ -641,7 +685,7 @@ class DuckdbDatabase(BaseDatabase):
         count: int,
     ) -> None:
         """Incrementally update tick overview for streaming writes."""
-        row: tuple | None = self.conn.execute(
+        row: tuple | None = cursor.execute(
             """
             SELECT count, start, "end"
             FROM dbtickoverview
@@ -652,7 +696,7 @@ class DuckdbDatabase(BaseDatabase):
 
         if row:
             overview_count, overview_start, overview_end = row
-            self.conn.execute(
+            cursor.execute(
                 """
                 UPDATE dbtickoverview
                 SET count = ?, start = ?, "end" = ?
@@ -667,7 +711,7 @@ class DuckdbDatabase(BaseDatabase):
                 ),
             )
         else:
-            self.conn.execute(
+            cursor.execute(
                 """
                 INSERT INTO dbtickoverview
                     (symbol, exchange, count, start, "end")
@@ -676,9 +720,9 @@ class DuckdbDatabase(BaseDatabase):
                 (symbol, exchange, count, start, end),
             )
 
-    def _refresh_bar_overview(self, symbol: str, exchange: str, interval: str) -> None:
+    def _refresh_bar_overview(self, cursor: duckdb.DuckDBPyConnection, symbol: str, exchange: str, interval: str) -> None:
         """Refresh bar overview with an exact count."""
-        row: tuple | None = self.conn.execute(
+        row: tuple | None = cursor.execute(
             """
             SELECT count(*)::INTEGER, min(datetime), max(datetime)
             FROM dbbardata
@@ -691,7 +735,7 @@ class DuckdbDatabase(BaseDatabase):
 
         count, start, end = row
         if count:
-            self.conn.execute(
+            cursor.execute(
                 """
                 INSERT OR REPLACE INTO dbbaroverview
                     (symbol, exchange, interval, count, start, "end")
@@ -700,7 +744,7 @@ class DuckdbDatabase(BaseDatabase):
                 (symbol, exchange, interval, count, start, end),
             )
         else:
-            self.conn.execute(
+            cursor.execute(
                 """
                 DELETE FROM dbbaroverview
                 WHERE symbol = ? AND exchange = ? AND interval = ?
@@ -708,9 +752,9 @@ class DuckdbDatabase(BaseDatabase):
                 (symbol, exchange, interval),
             )
 
-    def _refresh_tick_overview(self, symbol: str, exchange: str) -> None:
+    def _refresh_tick_overview(self, cursor: duckdb.DuckDBPyConnection, symbol: str, exchange: str) -> None:
         """Refresh tick overview with an exact count."""
-        row: tuple | None = self.conn.execute(
+        row: tuple | None = cursor.execute(
             """
             SELECT count(*)::INTEGER, min(datetime), max(datetime)
             FROM dbtickdata
@@ -723,7 +767,7 @@ class DuckdbDatabase(BaseDatabase):
 
         count, start, end = row
         if count:
-            self.conn.execute(
+            cursor.execute(
                 """
                 INSERT OR REPLACE INTO dbtickoverview
                     (symbol, exchange, count, start, "end")
@@ -732,7 +776,7 @@ class DuckdbDatabase(BaseDatabase):
                 (symbol, exchange, count, start, end),
             )
         else:
-            self.conn.execute(
+            cursor.execute(
                 """
                 DELETE FROM dbtickoverview
                 WHERE symbol = ? AND exchange = ?
@@ -817,9 +861,9 @@ class DuckdbDatabase(BaseDatabase):
             return convert_tz(dt)
         return dt
 
-    def _fetch_scalar_int(self, sql: str, params: tuple[Any, ...] = ()) -> int:
+    def _fetch_scalar_int(self, cursor: duckdb.DuckDBPyConnection, sql: str, params: tuple[Any, ...] = ()) -> int:
         """Fetch an integer scalar from a query that must return one row."""
-        row: tuple[Any, ...] | None = self.conn.execute(sql, params).fetchone()
+        row: tuple[Any, ...] | None = cursor.execute(sql, params).fetchone()
         if row is None:
             raise RuntimeError("Expected scalar query to return one row.")
         return int(row[0])
