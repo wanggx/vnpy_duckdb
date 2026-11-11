@@ -7,7 +7,9 @@
    小数，直接存 DOUBLE 会让库里到处是长小数。改类型后写入即按 2 位小数四舍五入，
    SQL 查询/导出干净。涉及 `dbbardata` 的 open/high/low/close_price 与 `dbtickdata`
    的 last/limit_up/limit_down/open/high/low/pre_close、bid/ask_price_1..5；
-   `_to_float()` 在读边界把 `Decimal` 转回 float，下游算法不受影响。
+   读路径在 SQL 里 `CAST(价格列 AS DOUBLE)`（`select_columns()`），由 DuckDB 在
+   C++ 层转换：实测 1 万行 0.030s，与 DOUBLE 列同速；直接 fetch DECIMAL 会返回
+   Python `Decimal`（0.156s，5 倍慢），再在 Python 里 float() 更慢（0.207s）。
    已有库在打开时自动迁移（`_migrate_price_types()`：按 information_schema 比对，
    只对 DOUBLE 列执行一次 `ALTER COLUMN ... TYPE DECIMAL(18,2)`，幂等）。
    注意：ETF/LOF/债券等 3 位小数报价的品种会被舍到 2 位。

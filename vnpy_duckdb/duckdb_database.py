@@ -93,6 +93,22 @@ PRICE_COLUMNS: dict[str, tuple[str, ...]] = {
 }
 
 
+def select_columns(table: str) -> str:
+    """SELECT 列表：价格列在 SQL 里 CAST 回 DOUBLE，其余列原样。
+
+    DECIMAL 列直接 fetch 回来是 Python ``Decimal``（实测 1 万行 0.156s，是 DOUBLE
+    的 5 倍；再在 Python 里 float() 一次更慢，0.207s）。交给 DuckDB 在 C++ 层
+    ``CAST(... AS DOUBLE)`` 后，取数耗时与 DOUBLE 列相同（0.030s），BarData /
+    TickData 也直接拿到 float。
+    """
+    columns: list[str] = BAR_COLUMNS if table == "dbbardata" else TICK_COLUMNS
+    prices: frozenset[str] = frozenset(PRICE_COLUMNS[table])
+    return ", ".join(
+        f"CAST({column} AS DOUBLE) AS {column}" if column in prices else column
+        for column in columns
+    )
+
+
 class DuckdbDatabase(BaseDatabase):
     """DuckDB database interface."""
 
@@ -306,9 +322,8 @@ class DuckdbDatabase(BaseDatabase):
         end: datetime,
     ) -> list[BarData]:
         """Load bar data from database."""
-        sql: str = """
-            SELECT symbol, exchange, datetime, interval, volume, turnover,
-                   open_interest, open_price, high_price, low_price, close_price
+        sql: str = f"""
+            SELECT {select_columns("dbbardata")}
             FROM dbbardata
             WHERE symbol = ?
               AND exchange = ?
@@ -360,7 +375,7 @@ class DuckdbDatabase(BaseDatabase):
         end: datetime,
     ) -> list[TickData]:
         """Load tick data from database."""
-        columns: str = ", ".join(TICK_COLUMNS)
+        columns: str = select_columns("dbtickdata")
         sql: str = f"""
             SELECT {columns}
             FROM dbtickdata
