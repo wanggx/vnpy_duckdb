@@ -75,6 +75,23 @@ TICK_COLUMNS: list[str] = [
 BAR_KEY: list[str] = ["symbol", "exchange", "interval", "datetime"]
 TICK_KEY: list[str] = ["symbol", "exchange", "datetime"]
 
+# 价格列的定点精度：存 DECIMAL(18,2) 而不是 DOUBLE。
+# DOUBLE 会把 QMT 的复权价/成交价原封不动存下来（如 10.123456789），库里到处是长
+# 小数，SQL 查询/导出一片噪声；DECIMAL(18,2) 在写入时即按 2 位小数四舍五入，
+# 读取端统一转回 float（见 load_bar_data / load_tick_data），下游算法不受影响。
+# 注意：ETF/LOF/债券等 3 位小数报价的品种会被舍到 2 位。
+PRICE_TYPE: str = "DECIMAL(18,2)"
+
+PRICE_COLUMNS: dict[str, tuple[str, ...]] = {
+    "dbbardata": ("open_price", "high_price", "low_price", "close_price"),
+    "dbtickdata": (
+        "last_price", "limit_up", "limit_down",
+        "open_price", "high_price", "low_price", "pre_close",
+        "bid_price_1", "bid_price_2", "bid_price_3", "bid_price_4", "bid_price_5",
+        "ask_price_1", "ask_price_2", "ask_price_3", "ask_price_4", "ask_price_5",
+    ),
+}
+
 
 class DuckdbDatabase(BaseDatabase):
     """DuckDB database interface."""
@@ -103,10 +120,10 @@ class DuckdbDatabase(BaseDatabase):
                         volume DOUBLE NOT NULL,
                         turnover DOUBLE NOT NULL,
                         open_interest DOUBLE NOT NULL,
-                        open_price DOUBLE NOT NULL,
-                        high_price DOUBLE NOT NULL,
-                        low_price DOUBLE NOT NULL,
-                        close_price DOUBLE NOT NULL,
+                        open_price DECIMAL(18,2) NOT NULL,
+                        high_price DECIMAL(18,2) NOT NULL,
+                        low_price DECIMAL(18,2) NOT NULL,
+                        close_price DECIMAL(18,2) NOT NULL,
                         PRIMARY KEY (symbol, exchange, interval, datetime)
                     )
                     """
@@ -121,24 +138,24 @@ class DuckdbDatabase(BaseDatabase):
                         volume DOUBLE NOT NULL,
                         turnover DOUBLE NOT NULL,
                         open_interest DOUBLE NOT NULL,
-                        last_price DOUBLE NOT NULL,
+                        last_price DECIMAL(18,2) NOT NULL,
                         last_volume DOUBLE NOT NULL,
-                        limit_up DOUBLE NOT NULL,
-                        limit_down DOUBLE NOT NULL,
-                        open_price DOUBLE NOT NULL,
-                        high_price DOUBLE NOT NULL,
-                        low_price DOUBLE NOT NULL,
-                        pre_close DOUBLE NOT NULL,
-                        bid_price_1 DOUBLE NOT NULL,
-                        bid_price_2 DOUBLE NOT NULL,
-                        bid_price_3 DOUBLE NOT NULL,
-                        bid_price_4 DOUBLE NOT NULL,
-                        bid_price_5 DOUBLE NOT NULL,
-                        ask_price_1 DOUBLE NOT NULL,
-                        ask_price_2 DOUBLE NOT NULL,
-                        ask_price_3 DOUBLE NOT NULL,
-                        ask_price_4 DOUBLE NOT NULL,
-                        ask_price_5 DOUBLE NOT NULL,
+                        limit_up DECIMAL(18,2) NOT NULL,
+                        limit_down DECIMAL(18,2) NOT NULL,
+                        open_price DECIMAL(18,2) NOT NULL,
+                        high_price DECIMAL(18,2) NOT NULL,
+                        low_price DECIMAL(18,2) NOT NULL,
+                        pre_close DECIMAL(18,2) NOT NULL,
+                        bid_price_1 DECIMAL(18,2) NOT NULL,
+                        bid_price_2 DECIMAL(18,2) NOT NULL,
+                        bid_price_3 DECIMAL(18,2) NOT NULL,
+                        bid_price_4 DECIMAL(18,2) NOT NULL,
+                        bid_price_5 DECIMAL(18,2) NOT NULL,
+                        ask_price_1 DECIMAL(18,2) NOT NULL,
+                        ask_price_2 DECIMAL(18,2) NOT NULL,
+                        ask_price_3 DECIMAL(18,2) NOT NULL,
+                        ask_price_4 DECIMAL(18,2) NOT NULL,
+                        ask_price_5 DECIMAL(18,2) NOT NULL,
                         bid_volume_1 DOUBLE NOT NULL,
                         bid_volume_2 DOUBLE NOT NULL,
                         bid_volume_3 DOUBLE NOT NULL,
@@ -179,8 +196,34 @@ class DuckdbDatabase(BaseDatabase):
                     )
                     """
                 )
+                self._migrate_price_types(cursor)
             finally:
                 cursor.close()
+
+    def _migrate_price_types(self, cursor: duckdb.DuckDBPyConnection) -> list[str]:
+        """把旧库里 DOUBLE 的价格列原地改成 DECIMAL(18,2)（幂等）。
+
+        新建的库在建表时已经是 DECIMAL；早期建的库那几列是 DOUBLE，`CREATE TABLE
+        IF NOT EXISTS` 不会改已有表，所以这里按 information_schema 比对后 ALTER。
+        ALTER 会重写该列，已存的长小数按列类型四舍五入到 2 位——只需要跑一次。
+        返回被改动的 ``表.列`` 列表（无改动时为空）。
+        """
+        altered: list[str] = []
+        for table, columns in PRICE_COLUMNS.items():
+            placeholders: str = ", ".join("?" for _ in columns)
+            rows: list[tuple] = cursor.execute(
+                "SELECT column_name, data_type FROM information_schema.columns "
+                f"WHERE table_name = ? AND column_name IN ({placeholders})",
+                (table, *columns),
+            ).fetchall()
+            for column, data_type in rows:
+                if str(data_type).upper() == PRICE_TYPE:
+                    continue
+                cursor.execute(
+                    f"ALTER TABLE {table} ALTER COLUMN {column} TYPE {PRICE_TYPE}"
+                )
+                altered.append(f"{table}.{column}")
+        return altered
 
     def save_bar_data(self, bars: list[BarData], stream: bool = False) -> bool:
         """Save bar data into database."""
@@ -299,10 +342,10 @@ class DuckdbDatabase(BaseDatabase):
                 volume=row[4],
                 turnover=row[5],
                 open_interest=row[6],
-                open_price=row[7],
-                high_price=row[8],
-                low_price=row[9],
-                close_price=row[10],
+                open_price=self._to_float(row[7]),
+                high_price=self._to_float(row[8]),
+                low_price=self._to_float(row[9]),
+                close_price=self._to_float(row[10]),
                 gateway_name="DB",
             )
             bars.append(bar)
@@ -344,6 +387,8 @@ class DuckdbDatabase(BaseDatabase):
         ticks: list[TickData] = []
         for row in rows:
             data: dict[str, Any] = dict(zip(TICK_COLUMNS, row, strict=True))
+            for column in PRICE_COLUMNS["dbtickdata"]:
+                data[column] = self._to_float(data[column])
             tick: TickData = TickData(
                 symbol=data["symbol"],
                 exchange=Exchange(data["exchange"]),
@@ -872,3 +917,17 @@ class DuckdbDatabase(BaseDatabase):
     def _restore_datetime(dt: datetime) -> datetime:
         """Restore a stored naive timestamp as a DB timezone-aware datetime."""
         return dt.replace(tzinfo=DB_TZ)
+
+    @staticmethod
+    def _to_float(value: Any) -> float:
+        """把 DECIMAL 列读回来的 ``Decimal`` 转成 float。
+
+        价格列是 DECIMAL(18,2)，驱动返回 ``decimal.Decimal``；vnpy 的 BarData /
+        TickData 以及下游策略都按 float 计算，Decimal 混入 float 运算会抛
+        TypeError，所以在读边界就地转掉。
+        """
+        if value is None:
+            return 0.0
+        if isinstance(value, float):
+            return value
+        return float(value)
