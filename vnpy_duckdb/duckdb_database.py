@@ -75,26 +75,36 @@ TICK_COLUMNS: list[str] = [
 BAR_KEY: list[str] = ["symbol", "exchange", "interval", "datetime"]
 TICK_KEY: list[str] = ["symbol", "exchange", "datetime"]
 
-# 价格列的定点精度：存 DECIMAL(18,2) 而不是 DOUBLE。
-# DOUBLE 会把 QMT 的复权价/成交价原封不动存下来（如 10.123456789），库里到处是长
-# 小数，SQL 查询/导出一片噪声；DECIMAL(18,2) 在写入时即按 2 位小数四舍五入，
-# 读取端统一转回 float（见 load_bar_data / load_tick_data），下游算法不受影响。
+# 数值列的定点精度：全部存 DECIMAL(18,2) 而不是 DOUBLE。
+# DOUBLE 会把 QMT 返回的值原封不动存下来（前复权价如 12.533842189676422，
+# 2 位小数也会漏出 11.540000000000001 这种二进制尾巴），库里到处是长小数，
+# SQL 查询/导出一片噪声；DECIMAL(18,2) 是定点数（整数 + 标度 2），写入时即按
+# 2 位小数四舍五入，任何输入都不会留下第 3 位。
+# 读取端由 select_columns() 在 SQL 里 CAST 回 DOUBLE，BarData / TickData 与
+# 下游策略照旧拿到 float。
 # 注意：ETF/LOF/债券等 3 位小数报价的品种会被舍到 2 位。
-PRICE_TYPE: str = "DECIMAL(18,2)"
+NUMERIC_TYPE: str = "DECIMAL(18,2)"
 
-PRICE_COLUMNS: dict[str, tuple[str, ...]] = {
-    "dbbardata": ("open_price", "high_price", "low_price", "close_price"),
+# 需要 DECIMAL 的列：价格 + 量额。其余（symbol/exchange/datetime/interval 等）不动。
+NUMERIC_COLUMNS: dict[str, tuple[str, ...]] = {
+    "dbbardata": (
+        "volume", "turnover", "open_interest",
+        "open_price", "high_price", "low_price", "close_price",
+    ),
     "dbtickdata": (
+        "volume", "turnover", "open_interest", "last_volume",
         "last_price", "limit_up", "limit_down",
         "open_price", "high_price", "low_price", "pre_close",
         "bid_price_1", "bid_price_2", "bid_price_3", "bid_price_4", "bid_price_5",
         "ask_price_1", "ask_price_2", "ask_price_3", "ask_price_4", "ask_price_5",
+        "bid_volume_1", "bid_volume_2", "bid_volume_3", "bid_volume_4", "bid_volume_5",
+        "ask_volume_1", "ask_volume_2", "ask_volume_3", "ask_volume_4", "ask_volume_5",
     ),
 }
 
 
 def select_columns(table: str) -> str:
-    """SELECT 列表：价格列在 SQL 里 CAST 回 DOUBLE，其余列原样。
+    """SELECT 列表：DECIMAL 列在 SQL 里 CAST 回 DOUBLE，其余列原样。
 
     DECIMAL 列直接 fetch 回来是 Python ``Decimal``（实测 1 万行 0.156s，是 DOUBLE
     的 5 倍；再在 Python 里 float() 一次更慢，0.207s）。交给 DuckDB 在 C++ 层
@@ -102,9 +112,9 @@ def select_columns(table: str) -> str:
     TickData 也直接拿到 float。
     """
     columns: list[str] = BAR_COLUMNS if table == "dbbardata" else TICK_COLUMNS
-    prices: frozenset[str] = frozenset(PRICE_COLUMNS[table])
+    numeric: frozenset[str] = frozenset(NUMERIC_COLUMNS[table])
     return ", ".join(
-        f"CAST({column} AS DOUBLE) AS {column}" if column in prices else column
+        f"CAST({column} AS DOUBLE) AS {column}" if column in numeric else column
         for column in columns
     )
 
@@ -133,9 +143,9 @@ class DuckdbDatabase(BaseDatabase):
                         exchange VARCHAR NOT NULL,
                         datetime TIMESTAMP NOT NULL,
                         interval VARCHAR NOT NULL,
-                        volume DOUBLE NOT NULL,
-                        turnover DOUBLE NOT NULL,
-                        open_interest DOUBLE NOT NULL,
+                        volume DECIMAL(18,2) NOT NULL,
+                        turnover DECIMAL(18,2) NOT NULL,
+                        open_interest DECIMAL(18,2) NOT NULL,
                         open_price DECIMAL(18,2) NOT NULL,
                         high_price DECIMAL(18,2) NOT NULL,
                         low_price DECIMAL(18,2) NOT NULL,
@@ -151,11 +161,11 @@ class DuckdbDatabase(BaseDatabase):
                         exchange VARCHAR NOT NULL,
                         datetime TIMESTAMP NOT NULL,
                         name VARCHAR NOT NULL,
-                        volume DOUBLE NOT NULL,
-                        turnover DOUBLE NOT NULL,
-                        open_interest DOUBLE NOT NULL,
+                        volume DECIMAL(18,2) NOT NULL,
+                        turnover DECIMAL(18,2) NOT NULL,
+                        open_interest DECIMAL(18,2) NOT NULL,
                         last_price DECIMAL(18,2) NOT NULL,
-                        last_volume DOUBLE NOT NULL,
+                        last_volume DECIMAL(18,2) NOT NULL,
                         limit_up DECIMAL(18,2) NOT NULL,
                         limit_down DECIMAL(18,2) NOT NULL,
                         open_price DECIMAL(18,2) NOT NULL,
@@ -172,16 +182,16 @@ class DuckdbDatabase(BaseDatabase):
                         ask_price_3 DECIMAL(18,2) NOT NULL,
                         ask_price_4 DECIMAL(18,2) NOT NULL,
                         ask_price_5 DECIMAL(18,2) NOT NULL,
-                        bid_volume_1 DOUBLE NOT NULL,
-                        bid_volume_2 DOUBLE NOT NULL,
-                        bid_volume_3 DOUBLE NOT NULL,
-                        bid_volume_4 DOUBLE NOT NULL,
-                        bid_volume_5 DOUBLE NOT NULL,
-                        ask_volume_1 DOUBLE NOT NULL,
-                        ask_volume_2 DOUBLE NOT NULL,
-                        ask_volume_3 DOUBLE NOT NULL,
-                        ask_volume_4 DOUBLE NOT NULL,
-                        ask_volume_5 DOUBLE NOT NULL,
+                        bid_volume_1 DECIMAL(18,2) NOT NULL,
+                        bid_volume_2 DECIMAL(18,2) NOT NULL,
+                        bid_volume_3 DECIMAL(18,2) NOT NULL,
+                        bid_volume_4 DECIMAL(18,2) NOT NULL,
+                        bid_volume_5 DECIMAL(18,2) NOT NULL,
+                        ask_volume_1 DECIMAL(18,2) NOT NULL,
+                        ask_volume_2 DECIMAL(18,2) NOT NULL,
+                        ask_volume_3 DECIMAL(18,2) NOT NULL,
+                        ask_volume_4 DECIMAL(18,2) NOT NULL,
+                        ask_volume_5 DECIMAL(18,2) NOT NULL,
                         localtime TIMESTAMP,
                         PRIMARY KEY (symbol, exchange, datetime)
                     )
@@ -212,20 +222,20 @@ class DuckdbDatabase(BaseDatabase):
                     )
                     """
                 )
-                self._migrate_price_types(cursor)
+                self._migrate_numeric_types(cursor)
             finally:
                 cursor.close()
 
-    def _migrate_price_types(self, cursor: duckdb.DuckDBPyConnection) -> list[str]:
-        """把旧库里 DOUBLE 的价格列原地改成 DECIMAL(18,2)（幂等）。
+    def _migrate_numeric_types(self, cursor: duckdb.DuckDBPyConnection) -> list[str]:
+        """把旧库里 DOUBLE 的数值列原地改成 DECIMAL(18,2)（幂等）。
 
-        新建的库在建表时已经是 DECIMAL；早期建的库那几列是 DOUBLE，`CREATE TABLE
+        新建的库在建表时已经是 DECIMAL；早期建的库那些列是 DOUBLE，`CREATE TABLE
         IF NOT EXISTS` 不会改已有表，所以这里按 information_schema 比对后 ALTER。
         ALTER 会重写该列，已存的长小数按列类型四舍五入到 2 位——只需要跑一次。
         返回被改动的 ``表.列`` 列表（无改动时为空）。
         """
         altered: list[str] = []
-        for table, columns in PRICE_COLUMNS.items():
+        for table, columns in NUMERIC_COLUMNS.items():
             placeholders: str = ", ".join("?" for _ in columns)
             rows: list[tuple] = cursor.execute(
                 "SELECT column_name, data_type FROM information_schema.columns "
@@ -233,10 +243,10 @@ class DuckdbDatabase(BaseDatabase):
                 (table, *columns),
             ).fetchall()
             for column, data_type in rows:
-                if str(data_type).upper() == PRICE_TYPE:
+                if str(data_type).upper() == NUMERIC_TYPE:
                     continue
                 cursor.execute(
-                    f"ALTER TABLE {table} ALTER COLUMN {column} TYPE {PRICE_TYPE}"
+                    f"ALTER TABLE {table} ALTER COLUMN {column} TYPE {NUMERIC_TYPE}"
                 )
                 altered.append(f"{table}.{column}")
         return altered
@@ -354,9 +364,9 @@ class DuckdbDatabase(BaseDatabase):
                 exchange=Exchange(row[1]),
                 datetime=self._restore_datetime(row[2]),
                 interval=Interval(row[3]),
-                volume=row[4],
-                turnover=row[5],
-                open_interest=row[6],
+                volume=self._to_float(row[4]),
+                turnover=self._to_float(row[5]),
+                open_interest=self._to_float(row[6]),
                 open_price=self._to_float(row[7]),
                 high_price=self._to_float(row[8]),
                 low_price=self._to_float(row[9]),
@@ -402,7 +412,7 @@ class DuckdbDatabase(BaseDatabase):
         ticks: list[TickData] = []
         for row in rows:
             data: dict[str, Any] = dict(zip(TICK_COLUMNS, row, strict=True))
-            for column in PRICE_COLUMNS["dbtickdata"]:
+            for column in NUMERIC_COLUMNS["dbtickdata"]:
                 data[column] = self._to_float(data[column])
             tick: TickData = TickData(
                 symbol=data["symbol"],
